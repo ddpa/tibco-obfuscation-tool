@@ -1,0 +1,74 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: "TiBCO Obfuscation Tool"
+  APP_ID: "com.diogo.tibcoobfuscationtool"
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - name: Install fyne packager
+        run: go install fyne.io/tools/cmd/fyne@latest
+      - name: Build universal .app
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o tibco-arm64 .
+          CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 CC="clang -arch x86_64" go build -o tibco-amd64 .
+          lipo -create -output tibco-universal tibco-arm64 tibco-amd64
+          "$(go env GOPATH)/bin/fyne" package -os darwin \
+            -name "$APP_NAME" -app-id "$APP_ID" -icon Icon.png -executable tibco-universal
+          ditto -c -k --keepParent "$APP_NAME.app" "TiBCO-Obfuscation-Tool-macOS.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macOS-app
+          path: TiBCO-Obfuscation-Tool-macOS.zip
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: TiBCO-Obfuscation-Tool-macOS.zip
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - name: Install fyne packager
+        run: go install fyne.io/tools/cmd/fyne@latest
+      - name: Build .exe
+        run: |
+          set -euo pipefail
+          # windows-latest ships MinGW-w64 (gcc) on PATH, which CGO needs.
+          CGO_ENABLED=1 "$(go env GOPATH)/bin/fyne" package -os windows \
+            -name "$APP_NAME" -app-id "$APP_ID" -icon Icon.png
+          mkdir -p dist && mv "$APP_NAME.exe" "dist/TiBCO Obfuscation Tool.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: dist/*.exe
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
